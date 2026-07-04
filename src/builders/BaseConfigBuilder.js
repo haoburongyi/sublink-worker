@@ -4,7 +4,7 @@ import { createTranslator } from '../i18n/index.js';
 import { generateRules, getOutbounds, PREDEFINED_RULE_SETS } from '../config/index.js';
 
 export class BaseConfigBuilder {
-    constructor(inputString, baseConfig, lang, userAgent, groupByCountry = false, includeAutoSelect = true, hostToReplace = undefined, sniToReplace = undefined) {
+    constructor(inputString, baseConfig, lang, userAgent, groupByCountry = false, includeAutoSelect = true) {
         this.inputString = inputString;
         this.config = deepCopy(baseConfig);
         this.customRules = [];
@@ -14,10 +14,6 @@ export class BaseConfigBuilder {
         this.appliedOverrideKeys = new Set();
         this.groupByCountry = groupByCountry;
         this.includeAutoSelect = includeAutoSelect;
-        // 仅用于修改 HTTP/WS 请求的 Host Header，不影响实际服务器地址
-        this.hostToReplace = hostToReplace;
-        // 可选的 SNI（TLS Server Name）覆盖，仅在提供时生效
-        this.sniToReplace = sniToReplace;
         this.providerUrls = [];  // URLs to use as providers (auto-sync)
         this.autoProviderDescriptors = undefined;
         this.subscriptionUserinfo = undefined;
@@ -367,19 +363,6 @@ export class BaseConfigBuilder {
             if (item?.tag) {
                 const convertedProxy = this.convertProxy(item);
                 if (convertedProxy) {
-                    // Apply Host header replacement (only modifies wsSettings.headers.Host)
-                    if (this.hostToReplace && convertedProxy.wsSettings) {
-                        convertedProxy.wsSettings.headers = { ...convertedProxy.wsSettings.headers, Host: this.hostToReplace };
-                    }
-                    // Apply optional SNI replacement (affects TLS SNI and gRPC service name)
-                    if (this.sniToReplace) {
-                        if (convertedProxy.tlsSettings) {
-                            convertedProxy.tlsSettings.serverName = this.sniToReplace;
-                        }
-                        if (convertedProxy.grpcSettings) {
-                            convertedProxy.grpcSettings.serviceName = this.sniToReplace;
-                        }
-                    }
                     this.addProxyToConfig(convertedProxy);
                 }
             }
