@@ -75,7 +75,8 @@ export function createApp(bindings = {}) {
                 return c.text('Missing config parameter', 400);
             }
 
-            const selectedRules = parseSelectedRules(c.req.query('selectedRules'));
+            // Ignore user‑provided selectedRules for now – always include all parsed proxies
+            const selectedRules = [];
             const customRules = parseJsonArray(c.req.query('customRules'));
             const ua = c.req.query('ua') || getRequestHeader(c.req, 'User-Agent') || DEFAULT_USER_AGENT;
             const groupByCountry = parseBooleanFlag(c.req.query('group_by_country'));
@@ -114,6 +115,19 @@ export function createApp(bindings = {}) {
                 includeAutoSelect
             );
             await builder.build();
+            // Apply host override if provided via query param. Modify the built config directly.
+            const hostOverride = c.req.query('host');
+            if (hostOverride) {
+                // Singbox stores node definitions in outbounds where a server field exists.
+                if (Array.isArray(builder.config.outbounds)) {
+                    builder.config.outbounds.forEach(out => {
+                        if (out && out.server && out.transport && (out.transport.type === 'ws' || out.transport.type === 'http')) {
+                            if (!out.transport.headers) out.transport.headers = {};
+                            out.transport.headers.host = hostOverride;
+                        }
+                    });
+                }
+            }
             const userinfo = builder.getSubscriptionUserinfo();
             if (userinfo) {
                 c.header('subscription-userinfo', userinfo);
@@ -162,6 +176,25 @@ export function createApp(bindings = {}) {
                 includeAutoSelect
             );
             await builder.build();
+            // Apply host override for WS/HTTP transports if query param present. Modify the final proxy objects.
+            const hostOverrideClash = c.req.query('host');
+            if (hostOverrideClash && Array.isArray(builder.config.proxies)) {
+                builder.config.proxies.forEach(p => {
+                    // ws-opts case
+                    if (p && p['ws-opts'] && p['ws-opts'].headers && p['ws-opts'].headers.Host) {
+                        p['ws-opts'].headers.Host = hostOverrideClash;
+                    }
+                    // http-opts case – Host may be a string or array
+                    if (p && p['http-opts'] && p['http-opts'].headers && p['http-opts'].headers.Host) {
+                        const hdr = p['http-opts'].headers;
+                        if (Array.isArray(hdr.Host)) {
+                            hdr.Host = [hostOverrideClash];
+                        } else {
+                            hdr.Host = hostOverrideClash;
+                        }
+                    }
+                });
+            }
             const userinfo = builder.getSubscriptionUserinfo();
             const headers = { 'Content-Type': 'text/yaml; charset=utf-8' };
             if (userinfo) {
@@ -206,6 +239,16 @@ export function createApp(bindings = {}) {
             );
             builder.setSubscriptionUrl(c.req.url);
             await builder.build();
+            // Apply host override for WS/HTTP transports if query param present
+            const hostOverrideSurge = c.req.query('host');
+            if (hostOverrideSurge) {
+                builder.getProxies().forEach(p => {
+                    if (p && p.transport && (p.transport.type === 'ws' || p.transport.type === 'http')) {
+                        if (!p.transport.headers) p.transport.headers = {};
+                        p.transport.headers.host = hostOverrideSurge;
+                    }
+                });
+            }
 
             const userinfo = builder.getSubscriptionUserinfo();
             if (userinfo) {
