@@ -86,6 +86,7 @@ export function createApp(bindings = {}) {
             const configId = c.req.query('configId');
             const lang = c.get('lang');
             const hostToReplace = c.req.query('host');
+            const sniToReplace = c.req.query('sni');
 
             const requestedSingboxVersion = c.req.query('singbox_version') || c.req.query('sb_version') || c.req.query('sb_ver');
             const requestUserAgent = getRequestHeader(c.req, 'User-Agent');
@@ -100,21 +101,22 @@ export function createApp(bindings = {}) {
                 }
             }
 
-            const builder = new SingboxConfigBuilder(
-                config,
-                selectedRules,
-                customRules,
-                baseConfig,
-                lang,
-                ua,
-                groupByCountry,
-                enableClashUI,
-                externalController,
-                externalUiDownloadUrl,
-                singboxConfigVersion,
-                includeAutoSelect,
-                hostToReplace
-            );
+                const builder = new SingboxConfigBuilder(
+                    config,
+                    selectedRules,
+                    customRules,
+                    baseConfig,
+                    lang,
+                    ua,
+                    groupByCountry,
+                    enableClashUI,
+                    externalController,
+                    externalUiDownloadUrl,
+                    singboxConfigVersion,
+                    includeAutoSelect,
+                    hostToReplace,
+                    sniToReplace
+                );
             await builder.build();
             const userinfo = builder.getSubscriptionUserinfo();
             if (userinfo) {
@@ -151,20 +153,21 @@ export function createApp(bindings = {}) {
                 baseConfig = await storage.getConfigById(configId);
             }
 
-            const builder = new ClashConfigBuilder(
-                config,
-                selectedRules,
-                customRules,
-                baseConfig,
-                lang,
-                ua,
-                groupByCountry,
-                enableClashUI,
-                externalController,
-                externalUiDownloadUrl,
-                includeAutoSelect,
-                hostToReplace
-            );
+                const builder = new ClashConfigBuilder(
+                    config,
+                    selectedRules,
+                    customRules,
+                    baseConfig,
+                    lang,
+                    ua,
+                    groupByCountry,
+                    enableClashUI,
+                    externalController,
+                    externalUiDownloadUrl,
+                    includeAutoSelect,
+                    hostToReplace,
+                    sniToReplace
+                );
             await builder.build();
             const userinfo = builder.getSubscriptionUserinfo();
             const headers = { 'Content-Type': 'text/yaml; charset=utf-8' };
@@ -199,17 +202,18 @@ export function createApp(bindings = {}) {
                 baseConfig = await storage.getConfigById(configId);
             }
 
-            const builder = new SurgeConfigBuilder(
-                config,
-                selectedRules,
-                customRules,
-                baseConfig,
-                lang,
-                ua,
-                groupByCountry,
-                includeAutoSelect,
-                hostToReplace
-            );
+                const builder = new SurgeConfigBuilder(
+                    config,
+                    selectedRules,
+                    customRules,
+                    baseConfig,
+                    lang,
+                    ua,
+                    groupByCountry,
+                    includeAutoSelect,
+                    hostToReplace,
+                    sniToReplace
+                );
             builder.setSubscriptionUrl(c.req.url);
             await builder.build();
 
@@ -293,18 +297,6 @@ export function createApp(bindings = {}) {
                         const text = await response.text();
                         let processed = tryDecodeSubscriptionLines(text, { decodeUriComponent: true });
                         if (!Array.isArray(processed)) processed = [processed];
-                        // Apply host replacement if provided via query parameter
-                        if (hostToReplace) {
-                            processed = processed.map(item => {
-                                try {
-                                    const url = new URL(item);
-                                    url.hostname = hostToReplace;
-                                    return url.toString();
-                                } catch (e) {
-                                    return item;
-                                }
-                            });
-                        }
                         finalProxyList.push(...processed.filter(item => typeof item === 'string' && item.trim() !== ''));
                     } catch (e) {
                         runtime.logger.warn('Failed to fetch the proxy', e);
@@ -312,17 +304,6 @@ export function createApp(bindings = {}) {
                 } else {
                 let processed = tryDecodeSubscriptionLines(trimmedProxy);
                 if (!Array.isArray(processed)) processed = [processed];
-                if (hostToReplace) {
-                    processed = processed.map(item => {
-                        try {
-                            const url = new URL(item);
-                            url.hostname = hostToReplace;
-                            return url.toString();
-                        } catch (e) {
-                            return item;
-                        }
-                    });
-                }
                 finalProxyList.push(...processed.filter(item => typeof item === 'string' && item.trim() !== ''));
             }
         }
