@@ -273,7 +273,7 @@ export function createApp(bindings = {}) {
         }
 
         const proxylist = inputString.split('\n');
-        const finalProxyList = [];
+        let finalProxyList = [];
         let subscriptionUserinfo;
         const userAgent = c.req.query('ua') || getRequestHeader(c.req, 'User-Agent') || DEFAULT_USER_AGENT;
         const headers = { 'User-Agent': userAgent };
@@ -283,21 +283,33 @@ export function createApp(bindings = {}) {
             const trimmedProxy = proxy.trim();
             if (!trimmedProxy) continue;
 
-            if (trimmedProxy.startsWith('http://') || trimmedProxy.startsWith('https://')) {
-                try {
-                    const response = await fetch(trimmedProxy, { method: 'GET', headers });
-                    const fetchedUserinfo = response.headers.get('subscription-userinfo');
-                    if (fetchedUserinfo && subscriptionUserinfo === undefined) {
-                        subscriptionUserinfo = fetchedUserinfo;
+                if (trimmedProxy.startsWith('http://') || trimmedProxy.startsWith('https://')) {
+                    try {
+                        const response = await fetch(trimmedProxy, { method: 'GET', headers });
+                        const fetchedUserinfo = response.headers.get('subscription-userinfo');
+                        if (fetchedUserinfo && subscriptionUserinfo === undefined) {
+                            subscriptionUserinfo = fetchedUserinfo;
+                        }
+                        const text = await response.text();
+                        let processed = tryDecodeSubscriptionLines(text, { decodeUriComponent: true });
+                        if (!Array.isArray(processed)) processed = [processed];
+                        // Apply host replacement if provided via query parameter
+                        if (hostToReplace) {
+                            processed = processed.map(item => {
+                                try {
+                                    const url = new URL(item);
+                                    url.hostname = hostToReplace;
+                                    return url.toString();
+                                } catch (e) {
+                                    return item;
+                                }
+                            });
+                        }
+                        finalProxyList.push(...processed.filter(item => typeof item === 'string' && item.trim() !== ''));
+                    } catch (e) {
+                        runtime.logger.warn('Failed to fetch the proxy', e);
                     }
-                    const text = await response.text();
-                    let processed = tryDecodeSubscriptionLines(text, { decodeUriComponent: true });
-                    if (!Array.isArray(processed)) processed = [processed];
-                    finalProxyList.push(...processed.filter(item => typeof item === 'string' && item.trim() !== ''));
-                } catch (e) {
-                    runtime.logger.warn('Failed to fetch the proxy', e);
-                }
-            } else {
+                } else {
                 let processed = tryDecodeSubscriptionLines(trimmedProxy);
                 if (!Array.isArray(processed)) processed = [processed];
                 if (hostToReplace) {
@@ -313,6 +325,51 @@ export function createApp(bindings = {}) {
                 }
                 finalProxyList.push(...processed.filter(item => typeof item === 'string' && item.trim() !== ''));
             }
+        }
+
+        // ---------- Host 替换完整实现（适用于 vmess/vless/trojan 等协议） ----------
+        if (hostToReplace) {
+            finalProxyList = finalProxyList.map(item => {
+                try {
+                    // 1. vmess:// 基于 Base64 编码的 JSON
+                    if (item.startsWith('vmess://')) {
+                        const b64 = item.slice('vmess://'.length);
+                        const jsonStr = Buffer.from(b64, 'base64').toString('utf-8');
+                        const cfg = JSON.parse(jsonStr);
+                        // 替换服务器地址和可能的 host / sni 字段
+                        cfg.add = hostToReplace;
+                        if (cfg.host) cfg.host = hostToReplace;
+                        if (cfg.sni) cfg.sni = hostToReplace;
+                        const newB64 = Buffer.from(JSON.stringify(cfg)).toString('base64');
+                        return `vmess://${newB64}`;
+                    }
+                    // 2. vless:// 通过 URL 参数 host、tls etc.
+                    if (item.startsWith('vless://')) {
+                        const url = new URL(item);
+                        // vless 的 host 信息通常在 query 参数 host= 或 =sni
+                        if (url.searchParams.has('host')) url.searchParams.set('host', hostToReplace);
+                        if (url.searchParams.has('sni')) url.searchParams.set('sni', hostToReplace);
+                        // address 在 URL 主机部分
+                        url.hostname = hostToReplace;
+                        return url.toString();
+                    }
+                    // 3. trojan://user@host:port?... 直接修改 hostname
+                    if (item.startsWith('trojan://')) {
+                        const url = new URL(item);
+                        url.hostname = hostToReplace;
+                        return url.toString();
+                    }
+                    // 4. shadowsocks://、hysteria2://、tuic:// 等协议，直接替换 hostname
+                    if (item.match(/^(ss|shadowsocks|hysteria2|tuic):\/\//)) {
+                        const url = new URL(item);
+                        url.hostname = hostToReplace;
+                        return url.toString();
+                    }
+                } catch (e) {
+                    // 解析失败保持原样
+                }
+                return item;
+            });
         }
 
         const finalString = finalProxyList.join('\n');
