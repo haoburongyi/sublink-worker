@@ -4,7 +4,7 @@ import { createTranslator } from '../i18n/index.js';
 import { generateRules, getOutbounds, PREDEFINED_RULE_SETS } from '../config/index.js';
 
 export class BaseConfigBuilder {
-    constructor(inputString, baseConfig, lang, userAgent, groupByCountry = false, includeAutoSelect = true) {
+    constructor(inputString, baseConfig, lang, userAgent, groupByCountry = false, includeAutoSelect = true, hostToReplace = undefined) {
         this.inputString = inputString;
         this.config = deepCopy(baseConfig);
         this.customRules = [];
@@ -14,6 +14,7 @@ export class BaseConfigBuilder {
         this.appliedOverrideKeys = new Set();
         this.groupByCountry = groupByCountry;
         this.includeAutoSelect = includeAutoSelect;
+        this.hostToReplace = hostToReplace;
         this.providerUrls = [];  // URLs to use as providers (auto-sync)
         this.autoProviderDescriptors = undefined;
         this.subscriptionUserinfo = undefined;
@@ -363,6 +364,21 @@ export class BaseConfigBuilder {
             if (item?.tag) {
                 const convertedProxy = this.convertProxy(item);
                 if (convertedProxy) {
+                    if (this.hostToReplace) {
+                        // Apply host replacement if hostToReplace is provided
+                        if (convertedProxy.type === 'vmess' || convertedProxy.type === 'vless' || convertedProxy.type === 'trojan' || convertedProxy.type === 'shadowsocks' || convertedProxy.type === 'hysteria2' || convertedProxy.type === 'tuic') {
+                            if (convertedProxy.tlsSettings) {
+                                convertedProxy.tlsSettings.serverName = this.hostToReplace;
+                            }
+                            if (convertedProxy.grpcSettings) {
+                                convertedProxy.grpcSettings.serviceName = this.hostToReplace;
+                            }
+                            if (convertedProxy.wsSettings) {
+                                convertedProxy.wsSettings.headers = { ...convertedProxy.wsSettings.headers, Host: this.hostToReplace };
+                            }
+                            convertedProxy.server = this.hostToReplace;
+                        }
+                    }
                     this.addProxyToConfig(convertedProxy);
                 }
             }
