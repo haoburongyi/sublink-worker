@@ -85,8 +85,6 @@ export function createApp(bindings = {}) {
             const externalUiDownloadUrl = c.req.query('external_ui_download_url');
             const configId = c.req.query('configId');
             const lang = c.get('lang');
-            const hostToReplace = c.req.query('host');
-            const sniToReplace = c.req.query('sni');
 
             const requestedSingboxVersion = c.req.query('singbox_version') || c.req.query('sb_version') || c.req.query('sb_ver');
             const requestUserAgent = getRequestHeader(c.req, 'User-Agent');
@@ -101,23 +99,31 @@ export function createApp(bindings = {}) {
                 }
             }
 
-                const builder = new SingboxConfigBuilder(
-                    config,
-                    selectedRules,
-                    customRules,
-                    baseConfig,
-                    lang,
-                    ua,
-                    groupByCountry,
-                    enableClashUI,
-                    externalController,
-                    externalUiDownloadUrl,
-                    singboxConfigVersion,
-                    includeAutoSelect,
-                    hostToReplace,
-                    sniToReplace
-                );
+            const builder = new SingboxConfigBuilder(
+                config,
+                selectedRules,
+                customRules,
+                baseConfig,
+                lang,
+                ua,
+                groupByCountry,
+                enableClashUI,
+                externalController,
+                externalUiDownloadUrl,
+                singboxConfigVersion,
+                includeAutoSelect
+            );
             await builder.build();
+            // Apply host override if provided via query param
+            const hostOverride = c.req.query('host');
+            if (hostOverride) {
+                builder.getProxies().forEach(p => {
+                    if (p && p.transport && (p.transport.type === 'ws' || p.transport.type === 'http')) {
+                        if (!p.transport.headers) p.transport.headers = {};
+                        p.transport.headers.host = hostOverride;
+                    }
+                });
+            }
             const userinfo = builder.getSubscriptionUserinfo();
             if (userinfo) {
                 c.header('subscription-userinfo', userinfo);
@@ -145,7 +151,6 @@ export function createApp(bindings = {}) {
             const externalUiDownloadUrl = c.req.query('external_ui_download_url');
             const configId = c.req.query('configId');
             const lang = c.get('lang');
-            const hostToReplace = c.req.query('host');
 
             let baseConfig;
             if (configId) {
@@ -153,22 +158,30 @@ export function createApp(bindings = {}) {
                 baseConfig = await storage.getConfigById(configId);
             }
 
-                const builder = new ClashConfigBuilder(
-                    config,
-                    selectedRules,
-                    customRules,
-                    baseConfig,
-                    lang,
-                    ua,
-                    groupByCountry,
-                    enableClashUI,
-                    externalController,
-                    externalUiDownloadUrl,
-                    includeAutoSelect,
-                    hostToReplace,
-                    sniToReplace
-                );
+            const builder = new ClashConfigBuilder(
+                config,
+                selectedRules,
+                customRules,
+                baseConfig,
+                lang,
+                ua,
+                groupByCountry,
+                enableClashUI,
+                externalController,
+                externalUiDownloadUrl,
+                includeAutoSelect
+            );
             await builder.build();
+            // Apply host override for WS/HTTP transports if query param present
+            const hostOverrideClash = c.req.query('host');
+            if (hostOverrideClash) {
+                builder.getProxies().forEach(p => {
+                    if (p && p.transport && (p.transport.type === 'ws' || p.transport.type === 'http')) {
+                        if (!p.transport.headers) p.transport.headers = {};
+                        p.transport.headers.host = hostOverrideClash;
+                    }
+                });
+            }
             const userinfo = builder.getSubscriptionUserinfo();
             const headers = { 'Content-Type': 'text/yaml; charset=utf-8' };
             if (userinfo) {
@@ -194,7 +207,6 @@ export function createApp(bindings = {}) {
             const includeAutoSelect = c.req.query('include_auto_select') !== 'false';
             const configId = c.req.query('configId');
             const lang = c.get('lang');
-            const hostToReplace = c.req.query('host');
 
             let baseConfig;
             if (configId) {
@@ -202,20 +214,28 @@ export function createApp(bindings = {}) {
                 baseConfig = await storage.getConfigById(configId);
             }
 
-                const builder = new SurgeConfigBuilder(
-                    config,
-                    selectedRules,
-                    customRules,
-                    baseConfig,
-                    lang,
-                    ua,
-                    groupByCountry,
-                    includeAutoSelect,
-                    hostToReplace,
-                    sniToReplace
-                );
+            const builder = new SurgeConfigBuilder(
+                config,
+                selectedRules,
+                customRules,
+                baseConfig,
+                lang,
+                ua,
+                groupByCountry,
+                includeAutoSelect
+            );
             builder.setSubscriptionUrl(c.req.url);
             await builder.build();
+            // Apply host override for WS/HTTP transports if query param present
+            const hostOverrideSurge = c.req.query('host');
+            if (hostOverrideSurge) {
+                builder.getProxies().forEach(p => {
+                    if (p && p.transport && (p.transport.type === 'ws' || p.transport.type === 'http')) {
+                        if (!p.transport.headers) p.transport.headers = {};
+                        p.transport.headers.host = hostOverrideSurge;
+                    }
+                });
+            }
 
             const userinfo = builder.getSubscriptionUserinfo();
             if (userinfo) {
@@ -277,80 +297,34 @@ export function createApp(bindings = {}) {
         }
 
         const proxylist = inputString.split('\n');
-        let finalProxyList = [];
+        const finalProxyList = [];
         let subscriptionUserinfo;
         const userAgent = c.req.query('ua') || getRequestHeader(c.req, 'User-Agent') || DEFAULT_USER_AGENT;
         const headers = { 'User-Agent': userAgent };
-        const hostToReplace = c.req.query('host');
 
         for (const proxy of proxylist) {
             const trimmedProxy = proxy.trim();
             if (!trimmedProxy) continue;
 
-                if (trimmedProxy.startsWith('http://') || trimmedProxy.startsWith('https://')) {
-                    try {
-                        const response = await fetch(trimmedProxy, { method: 'GET', headers });
-                        const fetchedUserinfo = response.headers.get('subscription-userinfo');
-                        if (fetchedUserinfo && subscriptionUserinfo === undefined) {
-                            subscriptionUserinfo = fetchedUserinfo;
-                        }
-                        const text = await response.text();
-                        let processed = tryDecodeSubscriptionLines(text, { decodeUriComponent: true });
-                        if (!Array.isArray(processed)) processed = [processed];
-                        finalProxyList.push(...processed.filter(item => typeof item === 'string' && item.trim() !== ''));
-                    } catch (e) {
-                        runtime.logger.warn('Failed to fetch the proxy', e);
+            if (trimmedProxy.startsWith('http://') || trimmedProxy.startsWith('https://')) {
+                try {
+                    const response = await fetch(trimmedProxy, { method: 'GET', headers });
+                    const fetchedUserinfo = response.headers.get('subscription-userinfo');
+                    if (fetchedUserinfo && subscriptionUserinfo === undefined) {
+                        subscriptionUserinfo = fetchedUserinfo;
                     }
-                } else {
+                    const text = await response.text();
+                    let processed = tryDecodeSubscriptionLines(text, { decodeUriComponent: true });
+                    if (!Array.isArray(processed)) processed = [processed];
+                    finalProxyList.push(...processed.filter(item => typeof item === 'string' && item.trim() !== ''));
+                } catch (e) {
+                    runtime.logger.warn('Failed to fetch the proxy', e);
+                }
+            } else {
                 let processed = tryDecodeSubscriptionLines(trimmedProxy);
                 if (!Array.isArray(processed)) processed = [processed];
                 finalProxyList.push(...processed.filter(item => typeof item === 'string' && item.trim() !== ''));
             }
-        }
-
-        // ---------- Host 替换完整实现（适用于 vmess/vless/trojan 等协议） ----------
-        if (hostToReplace) {
-            finalProxyList = finalProxyList.map(item => {
-                try {
-                    // 1. vmess:// 基于 Base64 编码的 JSON
-                    if (item.startsWith('vmess://')) {
-                        const b64 = item.slice('vmess://'.length);
-                        const jsonStr = Buffer.from(b64, 'base64').toString('utf-8');
-                        const cfg = JSON.parse(jsonStr);
-                        // 替换服务器地址和可能的 host / sni 字段
-                        cfg.add = hostToReplace;
-                        if (cfg.host) cfg.host = hostToReplace;
-                        if (cfg.sni) cfg.sni = hostToReplace;
-                        const newB64 = Buffer.from(JSON.stringify(cfg)).toString('base64');
-                        return `vmess://${newB64}`;
-                    }
-                    // 2. vless:// 通过 URL 参数 host、tls etc.
-                    if (item.startsWith('vless://')) {
-                        const url = new URL(item);
-                        // vless 的 host 信息通常在 query 参数 host= 或 =sni
-                        if (url.searchParams.has('host')) url.searchParams.set('host', hostToReplace);
-                        if (url.searchParams.has('sni')) url.searchParams.set('sni', hostToReplace);
-                        // address 在 URL 主机部分
-                        url.hostname = hostToReplace;
-                        return url.toString();
-                    }
-                    // 3. trojan://user@host:port?... 直接修改 hostname
-                    if (item.startsWith('trojan://')) {
-                        const url = new URL(item);
-                        url.hostname = hostToReplace;
-                        return url.toString();
-                    }
-                    // 4. shadowsocks://、hysteria2://、tuic:// 等协议，直接替换 hostname
-                    if (item.match(/^(ss|shadowsocks|hysteria2|tuic):\/\//)) {
-                        const url = new URL(item);
-                        url.hostname = hostToReplace;
-                        return url.toString();
-                    }
-                } catch (e) {
-                    // 解析失败保持原样
-                }
-                return item;
-            });
         }
 
         const finalString = finalProxyList.join('\n');
