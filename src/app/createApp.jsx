@@ -85,6 +85,7 @@ export function createApp(bindings = {}) {
             const externalUiDownloadUrl = c.req.query('external_ui_download_url');
             const configId = c.req.query('configId');
             const lang = c.get('lang');
+            const hostToReplace = c.req.query('host');
 
             const requestedSingboxVersion = c.req.query('singbox_version') || c.req.query('sb_version') || c.req.query('sb_ver');
             const requestUserAgent = getRequestHeader(c.req, 'User-Agent');
@@ -111,7 +112,8 @@ export function createApp(bindings = {}) {
                 externalController,
                 externalUiDownloadUrl,
                 singboxConfigVersion,
-                includeAutoSelect
+                includeAutoSelect,
+                hostToReplace
             );
             await builder.build();
             const userinfo = builder.getSubscriptionUserinfo();
@@ -141,6 +143,7 @@ export function createApp(bindings = {}) {
             const externalUiDownloadUrl = c.req.query('external_ui_download_url');
             const configId = c.req.query('configId');
             const lang = c.get('lang');
+            const hostToReplace = c.req.query('host');
 
             let baseConfig;
             if (configId) {
@@ -159,7 +162,8 @@ export function createApp(bindings = {}) {
                 enableClashUI,
                 externalController,
                 externalUiDownloadUrl,
-                includeAutoSelect
+                includeAutoSelect,
+                hostToReplace
             );
             await builder.build();
             const userinfo = builder.getSubscriptionUserinfo();
@@ -187,6 +191,7 @@ export function createApp(bindings = {}) {
             const includeAutoSelect = c.req.query('include_auto_select') !== 'false';
             const configId = c.req.query('configId');
             const lang = c.get('lang');
+            const hostToReplace = c.req.query('host');
 
             let baseConfig;
             if (configId) {
@@ -202,7 +207,8 @@ export function createApp(bindings = {}) {
                 lang,
                 ua,
                 groupByCountry,
-                includeAutoSelect
+                includeAutoSelect,
+                hostToReplace
             );
             builder.setSubscriptionUrl(c.req.url);
             await builder.build();
@@ -271,6 +277,7 @@ export function createApp(bindings = {}) {
         let subscriptionUserinfo;
         const userAgent = c.req.query('ua') || getRequestHeader(c.req, 'User-Agent') || DEFAULT_USER_AGENT;
         const headers = { 'User-Agent': userAgent };
+        const hostToReplace = c.req.query('host');
 
         for (const proxy of proxylist) {
             const trimmedProxy = proxy.trim();
@@ -293,6 +300,17 @@ export function createApp(bindings = {}) {
             } else {
                 let processed = tryDecodeSubscriptionLines(trimmedProxy);
                 if (!Array.isArray(processed)) processed = [processed];
+                if (hostToReplace) {
+                    processed = processed.map(item => {
+                        try {
+                            const url = new URL(item);
+                            url.hostname = hostToReplace;
+                            return url.toString();
+                        } catch (e) {
+                            return item;
+                        }
+                    });
+                }
                 finalProxyList.push(...processed.filter(item => typeof item === 'string' && item.trim() !== ''));
             }
         }
